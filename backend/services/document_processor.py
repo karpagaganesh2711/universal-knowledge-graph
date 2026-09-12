@@ -5,30 +5,22 @@ from docx import Document
 from pypdf import PdfReader
 
 
-SUPPORTED_EXTENSIONS = {
-    ".pdf",
-    ".docx",
-    ".txt",
-}
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
 
 def clean_text(text: str) -> str:
-    """
-    Clean extracted document text while preserving sentence structure.
-    """
-
     if not text:
         return ""
 
     text = text.replace("\x00", " ")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
 
-    text = text.replace("\r\n", "\n")
-    text = text.replace("\r", "\n")
+    # Never allow words to become accidentally joined.
+    text = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text)
 
-    # Remove excessive spaces around newlines.
     text = re.sub(r"[ \t]+", " ", text)
-
-    # Remove excessive blank lines.
+    text = re.sub(r"\n[ \t]+", "\n", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
 
     return text.strip()
@@ -36,7 +28,6 @@ def clean_text(text: str) -> str:
 
 def extract_text(file_path: str) -> str:
     path = Path(file_path)
-
     extension = path.suffix.lower()
 
     if extension not in SUPPORTED_EXTENSIONS:
@@ -51,75 +42,46 @@ def extract_text(file_path: str) -> str:
     if extension == ".docx":
         return extract_docx(path)
 
-    if extension == ".txt":
-        return extract_txt(path)
-
-    raise ValueError("Unable to process document.")
+    return extract_txt(path)
 
 
 def extract_pdf(path: Path) -> str:
-    """
-    Extract text from every PDF page while preserving
-    page boundaries.
-    """
-
     reader = PdfReader(str(path))
-
     pages = []
 
     for page_number, page in enumerate(reader.pages, start=1):
-        text = page.extract_text() or ""
-
-        text = clean_text(text)
+        text = clean_text(page.extract_text() or "")
 
         if text:
-            pages.append(
-                f"[PAGE {page_number}]\n{text}"
-            )
+            pages.append(f"[PAGE {page_number}]\n{text}")
 
     return "\n\n".join(pages).strip()
 
 
 def extract_docx(path: Path) -> str:
-    """
-    Extract DOCX paragraphs and headings.
-    """
-
     document = Document(str(path))
-
     blocks = []
 
     for paragraph in document.paragraphs:
-        text = paragraph.text.strip()
+        text = clean_text(paragraph.text)
 
         if not text:
             continue
 
-        style_name = ""
-
-        if paragraph.style:
-            style_name = paragraph.style.name or ""
+        style_name = paragraph.style.name if paragraph.style else ""
 
         if "heading" in style_name.lower():
-            blocks.append(
-                f"[HEADING] {text}"
-            )
+            blocks.append(f"[HEADING] {text}")
         else:
             blocks.append(text)
 
-    return clean_text(
-        "\n\n".join(blocks)
-    )
+    return "\n\n".join(blocks).strip()
 
 
 def extract_txt(path: Path) -> str:
-    """
-    Read UTF-8 text while tolerating malformed characters.
-    """
-
-    text = path.read_text(
-        encoding="utf-8",
-        errors="ignore",
+    return clean_text(
+        path.read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
     )
-
-    return clean_text(text)

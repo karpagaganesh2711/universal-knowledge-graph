@@ -2,19 +2,28 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 
 from services.document_processor import extract_text
-from services.graph_processor import build_knowledge_graph
 from services.nlp_processor import analyze_text
+from services.graph_processor import build_knowledge_graph
 
 
 app = FastAPI(
     title="Universal Knowledge Graph Generator",
-    description=(
-        "An AI-powered system that converts documents "
-        "into interactive knowledge graphs."
-    ),
-    version="0.4.0",
+    description="An AI-powered system that converts documents into interactive knowledge graphs.",
+    version="0.5.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -27,23 +36,15 @@ def root():
 
 @app.get("/health")
 def health():
-    return {
-        "status": "healthy"
-    }
+    return {"status": "healthy"}
 
 
 @app.post("/documents/analyze")
 async def analyze_document(file: UploadFile = File(...)):
-    """
-    Upload a PDF, DOCX, or TXT document,
-    extract its text, analyze it using NLP,
-    and generate a knowledge graph.
-    """
-
     if not file.filename:
         raise HTTPException(
             status_code=400,
-            detail="No filename was provided."
+            detail="No filename was provided.",
         )
 
     extension = Path(file.filename).suffix.lower()
@@ -57,7 +58,7 @@ async def analyze_document(file: UploadFile = File(...)):
     if extension not in allowed_extensions:
         raise HTTPException(
             status_code=400,
-            detail="Only PDF, DOCX, and TXT files are supported."
+            detail="Only PDF, DOCX, and TXT files are supported.",
         )
 
     file_content = await file.read()
@@ -65,44 +66,23 @@ async def analyze_document(file: UploadFile = File(...)):
     temporary_path = None
 
     try:
-        # -----------------------------------------------------
-        # STEP 1: Save uploaded file temporarily
-        # -----------------------------------------------------
-
         with NamedTemporaryFile(
             delete=False,
-            suffix=extension
+            suffix=extension,
         ) as temporary_file:
             temporary_file.write(file_content)
             temporary_path = temporary_file.name
-
-        # -----------------------------------------------------
-        # STEP 2: Extract document text
-        # -----------------------------------------------------
 
         text = extract_text(temporary_path)
 
         if not text:
             raise HTTPException(
                 status_code=422,
-                detail="No readable text was found in the document."
+                detail="No readable text was found in the document.",
             )
 
-        # -----------------------------------------------------
-        # STEP 3: Analyze text using spaCy
-        # -----------------------------------------------------
-
         analysis = analyze_text(text)
-
-        # -----------------------------------------------------
-        # STEP 4: Build knowledge graph
-        # -----------------------------------------------------
-
         graph = build_knowledge_graph(analysis)
-
-        # -----------------------------------------------------
-        # STEP 5: Return complete analysis
-        # -----------------------------------------------------
 
         return {
             "filename": file.filename,
@@ -110,13 +90,12 @@ async def analyze_document(file: UploadFile = File(...)):
             "characters": len(text),
             "words": len(text.split()),
             "status": "graph_generated",
-
             "sentences": analysis["sentences"],
             "sentence_count": analysis["sentence_count"],
-
             "entities": analysis["entities"],
             "entity_count": analysis["entity_count"],
-
+            "concepts": analysis["concepts"],
+            "concept_count": analysis["concept_count"],
             "graph": graph,
         }
 

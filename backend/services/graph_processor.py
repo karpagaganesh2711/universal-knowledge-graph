@@ -59,23 +59,37 @@ RELATION_MAP = {
     "retrieves": "retrieves",
     "retrieving": "retrieves",
 
-    "modify": "modifies",
-    "modifies": "modifies",
-    "modifying": "modifies",
+    "analyze": "analyzes",
+    "analyzes": "analyzes",
+    "analyzing": "analyzes",
 
-    "delete": "deletes",
-    "deletes": "deletes",
-
-    "describe": "describes",
-    "describes": "describes",
+    "process": "processes",
+    "processes": "processes",
+    "processing": "processes",
 
     "represent": "represents",
     "represents": "represents",
     "representing": "represents",
+
+    "maintain": "maintains",
+    "maintains": "maintains",
+    "maintaining": "maintains",
+
+    "describe": "describes",
+    "describes": "describes",
+    "describing": "describes",
 }
 
 
 STOPWORDS = {"a", "an", "the"}
+
+RELATION_PATTERNS = [
+    (r"\bconsists of\b", "consists_of"),
+    (r"\bdepends on\b", "depends_on"),
+    (r"\bis part of\b", "part_of"),
+    (r"\bis used by\b", "used_by"),
+    (r"\brefers to\b", "refers_to"),
+]
 
 
 def clean_text(text: str) -> str:
@@ -84,6 +98,13 @@ def clean_text(text: str) -> str:
 
 def normalize_text(text: str) -> str:
     text = clean_text(text)
+
+    text = re.sub(
+        r"^\[HEADING\]\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
 
     words = text.split()
 
@@ -107,6 +128,9 @@ def build_knowledge_graph(analysis: dict) -> dict:
 
     unique_nodes = {}
 
+    # ---------------------------------------------------------
+    # NODE DATABASE
+    # ---------------------------------------------------------
     for item in entities + concepts:
         original_text = clean_text(item.get("text", ""))
 
@@ -153,10 +177,14 @@ def build_knowledge_graph(analysis: dict) -> dict:
             description=node["description"],
         )
 
+    # ---------------------------------------------------------
+    # SENTENCE → NODE INDEX
+    # ---------------------------------------------------------
     sentence_nodes = []
 
     for sentence in sentences:
         sentence_lower = sentence.lower()
+
         found = []
 
         for node in unique_nodes.values():
@@ -183,6 +211,9 @@ def build_knowledge_graph(analysis: dict) -> dict:
 
         sentence_nodes.append(filtered)
 
+    # ---------------------------------------------------------
+    # DEPENDENCY RELATIONSHIPS
+    # ---------------------------------------------------------
     for sentence_index, token_data in enumerate(dependencies):
         if sentence_index >= len(sentence_nodes):
             break
@@ -228,7 +259,7 @@ def build_knowledge_graph(analysis: dict) -> dict:
                 }:
                     subjects.append(token["text"])
 
-                if dependency in {
+                elif dependency in {
                     "dobj",
                     "obj",
                     "attr",
@@ -247,20 +278,56 @@ def build_knowledge_graph(analysis: dict) -> dict:
                 nodes_in_sentence,
             )
 
-            if source and target:
-                if source["id"] == target["id"]:
-                    continue
-
+            if source and target and source["id"] != target["id"]:
                 add_relationship(
-                    graph,
-                    source["id"],
-                    target["id"],
-                    relationship,
-                    0.95,
-                    sentence_text,
-                    "dependency",
+                    graph=graph,
+                    source=source["id"],
+                    target=target["id"],
+                    relationship=relationship,
+                    confidence=0.95,
+                    sentence=sentence_text,
+                    method="dependency",
                 )
 
+    # ---------------------------------------------------------
+    # HIGH-CONFIDENCE PATTERN RELATIONSHIPS
+    # ---------------------------------------------------------
+    for index, sentence in enumerate(sentences):
+        if index >= len(sentence_nodes):
+            break
+
+        nodes_in_sentence = sentence_nodes[index]
+
+        if len(nodes_in_sentence) < 2:
+            continue
+
+        relationship = detect_pattern_relationship(
+            sentence
+        )
+
+        if not relationship:
+            continue
+
+        source, target = choose_pattern_nodes(
+            sentence,
+            nodes_in_sentence,
+            relationship,
+        )
+
+        if source and target and source["id"] != target["id"]:
+            add_relationship(
+                graph=graph,
+                source=source["id"],
+                target=target["id"],
+                relationship=relationship,
+                confidence=0.90,
+                sentence=sentence,
+                method="pattern",
+            )
+
+    # ---------------------------------------------------------
+    # SERIALIZATION
+    # ---------------------------------------------------------
     nodes = [
         {
             "id": node_id,
@@ -320,17 +387,87 @@ def find_best_node(token_texts, nodes):
     for token_text in token_texts:
         token_normalized = node_key(token_text)
 
+        if not token_normalized:
+            continue
+
+        exact = []
+
+        for node in nodes:
+            node_normalized = node_key(node["label"])
+
+            if token_normalized == node_normalized:
+                exact.append(node)
+
+        if exact:
+            return exact[0]
+
         for node in nodes:
             node_normalized = node_key(node["label"])
 
             if (
-                token_normalized == node_normalized
-                or token_normalized in node_normalized
-                or node_normalized in token_normalized
+                token_normalized in node_normalized
+                and len(token_normalized) >= 4
             ):
                 return node
 
     return None
+
+
+def detect_pattern_relationship(sentence: str):
+    lowered = sentence.lower()
+
+    for pattern, relationship in RELATION_PATTERNS:
+        if re.search(pattern, lowered):
+            return relationship
+
+    return None
+
+
+def choose_pattern_nodes(
+    sentence,
+    nodes,
+    relationship,
+):
+    lowered = sentence.lower()
+
+    for pattern, relation in RELATION_PATTERNS:
+        if relation != relationship:
+            continue
+
+        match = re.search(pattern, lowered)
+
+        if not match:
+            continue
+
+        before = lowered[:match.start()]
+        after = lowered[match.end():]
+
+        source_candidates = [
+            node
+            for node in nodes
+            if node["label"].lower() in before
+        ]
+
+        target_candidates = [
+            node
+            for node in nodes
+            if node["label"].lower() in after
+        ]
+
+        if source_candidates and target_candidates:
+            return (
+                longest_node(source_candidates),
+                longest_node(target_candidates),
+            )
+
+    return nodes[0], nodes[1]
+
+
+def longest_node(nodes):
+    return max(
+        nodes,
+        key=lambda node: len(node["label"]),
+    )
 
 
 def relationship_exists(

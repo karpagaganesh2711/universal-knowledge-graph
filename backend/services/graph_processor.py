@@ -168,7 +168,9 @@ def build_knowledge_graph(analysis: dict) -> dict:
     # =========================================================
 
     for item in entities + concepts:
-        original_text = clean_text(item.get("text", ""))
+        original_text = clean_text(
+            item.get("text", "")
+        )
 
         if not original_text:
             continue
@@ -176,12 +178,17 @@ def build_knowledge_graph(analysis: dict) -> dict:
         if original_text.startswith("["):
             continue
 
-        normalized = normalize_text(original_text)
+        normalized = normalize_text(
+            original_text
+        )
 
         if not normalized:
             continue
 
-        canonical = canonical_concept(normalized)
+        canonical = canonical_concept(
+            normalized
+        )
+
         key = canonical.lower()
 
         if key not in unique_nodes:
@@ -189,7 +196,10 @@ def build_knowledge_graph(analysis: dict) -> dict:
                 "id": canonical,
                 "label": canonical,
                 "aliases": [normalized],
-                "type": item.get("label", "CONCEPT"),
+                "type": item.get(
+                    "label",
+                    "CONCEPT",
+                ),
                 "description": item.get(
                     "description",
                     "Concept or entity",
@@ -197,7 +207,9 @@ def build_knowledge_graph(analysis: dict) -> dict:
             }
         else:
             if normalized not in unique_nodes[key]["aliases"]:
-                unique_nodes[key]["aliases"].append(normalized)
+                unique_nodes[key]["aliases"].append(
+                    normalized
+                )
 
             if item.get("source") == "named_entity":
                 unique_nodes[key]["type"] = item.get(
@@ -252,7 +264,10 @@ def build_knowledge_graph(analysis: dict) -> dict:
 
             if best_position is not None:
                 found.append(
-                    (best_position, node)
+                    (
+                        best_position,
+                        node,
+                    )
                 )
 
         seen = set()
@@ -283,21 +298,30 @@ def build_knowledge_graph(analysis: dict) -> dict:
     # DEPENDENCY RELATIONSHIPS
     # =========================================================
 
-    for sentence_index, token_data in enumerate(dependencies):
+    for sentence_index, token_data in enumerate(
+        dependencies
+    ):
         if sentence_index >= len(sentence_nodes):
             break
 
-        sentence_entries = sentence_nodes[sentence_index]
+        sentence_entries = sentence_nodes[
+            sentence_index
+        ]
 
         if len(sentence_entries) < 2:
             continue
 
-        sentence_text = sentences[sentence_index]
+        sentence_text = sentences[
+            sentence_index
+        ]
 
         verbs = [
             token
             for token in token_data
-            if token.get("pos") in {"VERB", "AUX"}
+            if token.get("pos") in {
+                "VERB",
+                "AUX",
+            }
         ]
 
         for verb in verbs:
@@ -354,24 +378,23 @@ def build_knowledge_graph(analysis: dict) -> dict:
                         token["text"]
                     )
 
+            available_nodes = [
+                entry["node"]
+                for entry in sentence_entries
+            ]
+
             source = find_best_node(
                 subjects,
-                [
-                    entry["node"]
-                    for entry in sentence_entries
-                ],
+                available_nodes,
             )
 
             target = find_best_node(
                 objects,
-                [
-                    entry["node"]
-                    for entry in sentence_entries
-                ],
+                available_nodes,
             )
 
             # -------------------------------------------------
-            # FALLBACK: POSITION-BASED SEMANTIC MATCHING
+            # POSITION FALLBACK
             # -------------------------------------------------
 
             if not source or not target:
@@ -383,13 +406,15 @@ def build_knowledge_graph(analysis: dict) -> dict:
                     before = [
                         entry
                         for entry in sentence_entries
-                        if entry["position"] < verb_position
+                        if entry["position"]
+                        < verb_position
                     ]
 
                     after = [
                         entry
                         for entry in sentence_entries
-                        if entry["position"] > verb_position
+                        if entry["position"]
+                        > verb_position
                     ]
 
                     if not source and before:
@@ -458,6 +483,44 @@ def build_knowledge_graph(analysis: dict) -> dict:
             )
 
     # =========================================================
+    # GRAPH INTELLIGENCE METADATA
+    # =========================================================
+
+    for node_id in graph.nodes:
+        degree = graph.degree(node_id)
+
+        graph.nodes[node_id]["degree"] = degree
+        graph.nodes[node_id]["importance"] = calculate_node_importance(
+            graph,
+            node_id,
+        )
+
+    for source, target, data in graph.edges(
+        data=True
+    ):
+        confidence = data.get(
+            "confidence",
+            0.5,
+        )
+
+        degree_bonus = min(
+            (
+                graph.degree(source)
+                + graph.degree(target)
+            )
+            * 0.01,
+            0.05,
+        )
+
+        data["score"] = round(
+            min(
+                confidence + degree_bonus,
+                1.0,
+            ),
+            3,
+        )
+
+    # =========================================================
     # SERIALIZATION
     # =========================================================
 
@@ -480,8 +543,18 @@ def build_knowledge_graph(analysis: dict) -> dict:
                 "aliases",
                 [],
             ),
+            "degree": data.get(
+                "degree",
+                0,
+            ),
+            "importance": data.get(
+                "importance",
+                0,
+            ),
         }
-        for node_id, data in graph.nodes(data=True)
+        for node_id, data in graph.nodes(
+            data=True
+        )
     ]
 
     relationships = [
@@ -500,6 +573,13 @@ def build_knowledge_graph(analysis: dict) -> dict:
                 "confidence",
                 0.5,
             ),
+            "score": data.get(
+                "score",
+                data.get(
+                    "confidence",
+                    0.5,
+                ),
+            ),
             "sentence": data.get(
                 "sentence",
                 "",
@@ -509,13 +589,16 @@ def build_knowledge_graph(analysis: dict) -> dict:
                 "unknown",
             ),
         }
-        for source, target, data in graph.edges(data=True)
+        for source, target, data in graph.edges(
+            data=True
+        )
     ]
 
     semantic_relationships = [
         item
         for item in relationships
-        if item["relationship"] != "mentioned_with"
+        if item["relationship"]
+        != "mentioned_with"
     ]
 
     return {
@@ -534,13 +617,65 @@ def build_knowledge_graph(analysis: dict) -> dict:
                     item["confidence"]
                     for item in semantic_relationships
                 )
-                / len(semantic_relationships),
+                / len(
+                    semantic_relationships
+                ),
                 3,
             )
             if semantic_relationships
             else 0
         ),
+        "average_relationship_score": (
+            round(
+                sum(
+                    item["score"]
+                    for item in semantic_relationships
+                )
+                / len(
+                    semantic_relationships
+                ),
+                3,
+            )
+            if semantic_relationships
+            else 0
+        ),
+        "most_important_nodes": sorted(
+            [
+                {
+                    "id": node_id,
+                    "importance": data.get(
+                        "importance",
+                        0,
+                    ),
+                }
+                for node_id, data in graph.nodes(
+                    data=True
+                )
+            ],
+            key=lambda item: item["importance"],
+            reverse=True,
+        )[:10],
     }
+
+
+def calculate_node_importance(
+    graph,
+    node_id,
+):
+    degree = graph.degree(node_id)
+
+    if graph.number_of_nodes() <= 1:
+        return 0
+
+    normalized_degree = (
+        degree
+        / (graph.number_of_nodes() - 1)
+    )
+
+    return round(
+        normalized_degree,
+        3,
+    )
 
 
 def find_best_node(
@@ -557,8 +692,14 @@ def find_best_node(
 
         for node in nodes:
             values = [
-                node.get("label", ""),
-                *node.get("aliases", []),
+                node.get(
+                    "label",
+                    "",
+                ),
+                *node.get(
+                    "aliases",
+                    [],
+                ),
             ]
 
             for value in values:

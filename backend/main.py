@@ -4,6 +4,8 @@ from tempfile import NamedTemporaryFile
 from fastapi import FastAPI, File, HTTPException, UploadFile
 
 from services.document_processor import extract_text
+from services.graph_processor import build_knowledge_graph
+from services.nlp_processor import analyze_text
 
 
 app = FastAPI(
@@ -12,7 +14,7 @@ app = FastAPI(
         "An AI-powered system that converts documents "
         "into interactive knowledge graphs."
     ),
-    version="0.2.0",
+    version="0.4.0",
 )
 
 
@@ -30,10 +32,12 @@ def health():
     }
 
 
-@app.post("/documents/extract")
-async def extract_document(file: UploadFile = File(...)):
+@app.post("/documents/analyze")
+async def analyze_document(file: UploadFile = File(...)):
     """
-    Upload a PDF, DOCX, or TXT document and extract its text.
+    Upload a PDF, DOCX, or TXT document,
+    extract its text, analyze it using NLP,
+    and generate a knowledge graph.
     """
 
     if not file.filename:
@@ -61,6 +65,10 @@ async def extract_document(file: UploadFile = File(...)):
     temporary_path = None
 
     try:
+        # -----------------------------------------------------
+        # STEP 1: Save uploaded file temporarily
+        # -----------------------------------------------------
+
         with NamedTemporaryFile(
             delete=False,
             suffix=extension
@@ -68,23 +76,48 @@ async def extract_document(file: UploadFile = File(...)):
             temporary_file.write(file_content)
             temporary_path = temporary_file.name
 
+        # -----------------------------------------------------
+        # STEP 2: Extract document text
+        # -----------------------------------------------------
+
         text = extract_text(temporary_path)
 
         if not text:
             raise HTTPException(
                 status_code=422,
-                detail=(
-                    "No readable text was found in the document."
-                ),
+                detail="No readable text was found in the document."
             )
+
+        # -----------------------------------------------------
+        # STEP 3: Analyze text using spaCy
+        # -----------------------------------------------------
+
+        analysis = analyze_text(text)
+
+        # -----------------------------------------------------
+        # STEP 4: Build knowledge graph
+        # -----------------------------------------------------
+
+        graph = build_knowledge_graph(analysis)
+
+        # -----------------------------------------------------
+        # STEP 5: Return complete analysis
+        # -----------------------------------------------------
 
         return {
             "filename": file.filename,
             "file_type": extension.replace(".", "").upper(),
             "characters": len(text),
             "words": len(text.split()),
-            "status": "text_extracted",
-            "text_preview": text[:1000],
+            "status": "graph_generated",
+
+            "sentences": analysis["sentences"],
+            "sentence_count": analysis["sentence_count"],
+
+            "entities": analysis["entities"],
+            "entity_count": analysis["entity_count"],
+
+            "graph": graph,
         }
 
     except HTTPException:
@@ -93,7 +126,7 @@ async def extract_document(file: UploadFile = File(...)):
     except Exception as error:
         raise HTTPException(
             status_code=500,
-            detail=f"Document processing failed: {str(error)}",
+            detail=f"Document analysis failed: {str(error)}",
         )
 
     finally:

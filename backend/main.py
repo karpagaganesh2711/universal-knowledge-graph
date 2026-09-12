@@ -9,6 +9,9 @@ from services.nlp_processor import analyze_text
 from services.graph_processor import build_knowledge_graph
 
 
+LATEST_GRAPH = None
+
+
 app = FastAPI(
     title="Universal Knowledge Graph Generator",
     description="An AI-powered system that converts documents into interactive knowledge graphs.",
@@ -37,6 +40,78 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+
+@app.get("/graph/stats")
+def graph_stats():
+    if not LATEST_GRAPH:
+        raise HTTPException(
+            status_code=404,
+            detail="No graph has been generated yet.",
+        )
+
+    return {
+        "node_count": LATEST_GRAPH["node_count"],
+        "relationship_count": LATEST_GRAPH["relationship_count"],
+        "semantic_relationship_count": LATEST_GRAPH[
+            "semantic_relationship_count"
+        ],
+        "average_relationship_confidence": LATEST_GRAPH[
+            "average_relationship_confidence"
+        ],
+        "average_relationship_score": LATEST_GRAPH[
+            "average_relationship_score"
+        ],
+    }
+
+
+@app.get("/graph/important-nodes")
+def important_nodes(limit: int = 10):
+    if not LATEST_GRAPH:
+        raise HTTPException(
+            status_code=404,
+            detail="No graph has been generated yet.",
+        )
+
+    if limit < 1 or limit > 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Limit must be between 1 and 50.",
+        )
+
+    return {
+        "nodes": LATEST_GRAPH[
+            "most_important_nodes"
+        ][:limit]
+    }
+
+
+@app.get("/graph/strongest-relationships")
+def strongest_relationships(limit: int = 10):
+    if not LATEST_GRAPH:
+        raise HTTPException(
+            status_code=404,
+            detail="No graph has been generated yet.",
+        )
+
+    if limit < 1 or limit > 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Limit must be between 1 and 50.",
+        )
+
+    relationships = sorted(
+        LATEST_GRAPH["relationships"],
+        key=lambda item: item.get(
+            "score",
+            0,
+        ),
+        reverse=True,
+    )
+
+    return {
+        "relationships": relationships[:limit]
+    }
 
 
 @app.post("/documents/analyze")
@@ -83,6 +158,9 @@ async def analyze_document(file: UploadFile = File(...)):
 
         analysis = analyze_text(text)
         graph = build_knowledge_graph(analysis)
+
+        global LATEST_GRAPH
+        LATEST_GRAPH = graph
 
         return {
             "filename": file.filename,

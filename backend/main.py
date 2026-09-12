@@ -12,7 +12,7 @@ from services.graph_processor import build_knowledge_graph
 app = FastAPI(
     title="Universal Knowledge Graph Generator",
     description="An AI-powered system that converts documents into interactive knowledge graphs.",
-    version="0.5.0",
+    version="0.6.0",
 )
 
 app.add_middleware(

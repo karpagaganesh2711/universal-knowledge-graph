@@ -83,6 +83,31 @@ RELATION_MAP = {
 
 STOPWORDS = {"a", "an", "the"}
 
+
+CONCEPT_ALIASES = {
+    "ai": "artificial intelligence",
+    "artificial intelligence systems": "artificial intelligence",
+    "artificial intelligence system": "artificial intelligence",
+
+    "ml": "machine learning",
+    "machine learning models": "machine learning",
+    "machine learning model": "machine learning",
+
+    "knowledge graphs": "knowledge graph",
+    "knowledge graph system": "knowledge graph",
+    "knowledge graph systems": "knowledge graph",
+
+    "databases": "database",
+    "database systems": "database",
+    "database system": "database",
+
+    "cloud computing services": "cloud computing",
+    "cloud computing service": "cloud computing",
+    "cloud applications": "cloud application",
+    "cloud services": "cloud service",
+}
+
+
 RELATION_PATTERNS = [
     (r"\bconsists of\b", "consists_of"),
     (r"\bdepends on\b", "depends_on"),
@@ -114,8 +139,18 @@ def normalize_text(text: str) -> str:
     return " ".join(words).strip()
 
 
+def canonical_concept(text: str) -> str:
+    normalized = normalize_text(text)
+    key = normalized.lower()
+
+    return CONCEPT_ALIASES.get(
+        key,
+        normalized,
+    )
+
+
 def node_key(text: str) -> str:
-    return normalize_text(text).lower()
+    return canonical_concept(text).lower()
 
 
 def build_knowledge_graph(analysis: dict) -> dict:
@@ -128,9 +163,10 @@ def build_knowledge_graph(analysis: dict) -> dict:
 
     unique_nodes = {}
 
-    # ---------------------------------------------------------
+    # =========================================================
     # NODE DATABASE
-    # ---------------------------------------------------------
+    # =========================================================
+
     for item in entities + concepts:
         original_text = clean_text(item.get("text", ""))
 
@@ -145,29 +181,34 @@ def build_knowledge_graph(analysis: dict) -> dict:
         if not normalized:
             continue
 
-        key = node_key(normalized)
+        canonical = canonical_concept(normalized)
+        key = canonical.lower()
 
         if key not in unique_nodes:
             unique_nodes[key] = {
-                "id": normalized,
-                "label": normalized,
+                "id": canonical,
+                "label": canonical,
+                "aliases": [normalized],
                 "type": item.get("label", "CONCEPT"),
                 "description": item.get(
                     "description",
                     "Concept or entity",
                 ),
             }
+        else:
+            if normalized not in unique_nodes[key]["aliases"]:
+                unique_nodes[key]["aliases"].append(normalized)
 
-        elif item.get("source") == "named_entity":
-            unique_nodes[key]["type"] = item.get(
-                "label",
-                unique_nodes[key]["type"],
-            )
+            if item.get("source") == "named_entity":
+                unique_nodes[key]["type"] = item.get(
+                    "label",
+                    unique_nodes[key]["type"],
+                )
 
-            unique_nodes[key]["description"] = item.get(
-                "description",
-                unique_nodes[key]["description"],
-            )
+                unique_nodes[key]["description"] = item.get(
+                    "description",
+                    unique_nodes[key]["description"],
+                )
 
     for node in unique_nodes.values():
         graph.add_node(
@@ -175,11 +216,13 @@ def build_knowledge_graph(analysis: dict) -> dict:
             label=node["label"],
             type=node["type"],
             description=node["description"],
+            aliases=node["aliases"],
         )
 
-    # ---------------------------------------------------------
+    # =========================================================
     # SENTENCE → NODE INDEX
-    # ---------------------------------------------------------
+    # =========================================================
+
     sentence_nodes = []
 
     for sentence in sentences:
@@ -188,39 +231,65 @@ def build_knowledge_graph(analysis: dict) -> dict:
         found = []
 
         for node in unique_nodes.values():
-            label = node["label"]
+            best_position = None
 
-            if label.lower() in sentence_lower:
-                found.append(node)
+            values = [
+                node["label"],
+                *node.get("aliases", []),
+            ]
+
+            for value in values:
+                position = sentence_lower.find(
+                    value.lower()
+                )
+
+                if position != -1:
+                    if (
+                        best_position is None
+                        or position < best_position
+                    ):
+                        best_position = position
+
+            if best_position is not None:
+                found.append(
+                    (best_position, node)
+                )
 
         seen = set()
         filtered = []
 
-        for node in found:
+        for position, node in found:
             key = node_key(node["id"])
 
-            if key not in seen:
-                seen.add(key)
-                filtered.append(node)
+            if key in seen:
+                continue
+
+            seen.add(key)
+
+            filtered.append(
+                {
+                    "node": node,
+                    "position": position,
+                }
+            )
 
         filtered.sort(
-            key=lambda node: sentence_lower.find(
-                node["label"].lower()
-            )
+            key=lambda item: item["position"]
         )
 
         sentence_nodes.append(filtered)
 
-    # ---------------------------------------------------------
+    # =========================================================
     # DEPENDENCY RELATIONSHIPS
-    # ---------------------------------------------------------
+    # =========================================================
+
     for sentence_index, token_data in enumerate(dependencies):
         if sentence_index >= len(sentence_nodes):
             break
 
-        nodes_in_sentence = sentence_nodes[sentence_index]
+        sentence_entries = sentence_nodes[sentence_index]
 
-        if len(nodes_in_sentence) < 2:
+        if len(sentence_entries) < 2:
             continue
 
         sentence_text = sentences[sentence_index]
@@ -232,8 +301,15 @@ def build_knowledge_graph(analysis: dict) -> dict:
         ]
 
         for verb in verbs:
-            verb_text = verb.get("text", "").lower()
-            verb_lemma = verb.get("lemma", "").lower()
+            verb_text = verb.get(
+                "text",
+                "",
+            ).lower()
+
+            verb_lemma = verb.get(
+                "lemma",
+                "",
+            ).lower()
 
             relationship = (
                 RELATION_MAP.get(verb_lemma)
@@ -247,17 +323,25 @@ def build_knowledge_graph(analysis: dict) -> dict:
             objects = []
 
             for token in token_data:
-                if token.get("head", "").lower() != verb_text:
+                if token.get(
+                    "head",
+                    "",
+                ).lower() != verb_text:
                     continue
 
-                dependency = token.get("dep", "")
+                dependency = token.get(
+                    "dep",
+                    "",
+                )
 
                 if dependency in {
                     "nsubj",
                     "nsubjpass",
                     "csubj",
                 }:
-                    subjects.append(token["text"])
+                    subjects.append(
+                        token["text"]
+                    )
 
                 elif dependency in {
                     "dobj",
@@ -266,19 +350,59 @@ def build_knowledge_graph(analysis: dict) -> dict:
                     "pobj",
                     "dative",
                 }:
-                    objects.append(token["text"])
+                    objects.append(
+                        token["text"]
+                    )
 
             source = find_best_node(
                 subjects,
-                nodes_in_sentence,
+                [
+                    entry["node"]
+                    for entry in sentence_entries
+                ],
             )
 
             target = find_best_node(
                 objects,
-                nodes_in_sentence,
+                [
+                    entry["node"]
+                    for entry in sentence_entries
+                ],
             )
 
-            if source and target and source["id"] != target["id"]:
+            # -------------------------------------------------
+            # FALLBACK: POSITION-BASED SEMANTIC MATCHING
+            # -------------------------------------------------
+
+            if not source or not target:
+                verb_position = sentence_text.lower().find(
+                    verb_text
+                )
+
+                if verb_position != -1:
+                    before = [
+                        entry
+                        for entry in sentence_entries
+                        if entry["position"] < verb_position
+                    ]
+
+                    after = [
+                        entry
+                        for entry in sentence_entries
+                        if entry["position"] > verb_position
+                    ]
+
+                    if not source and before:
+                        source = before[-1]["node"]
+
+                    if not target and after:
+                        target = after[0]["node"]
+
+            if (
+                source
+                and target
+                and source["id"] != target["id"]
+            ):
                 add_relationship(
                     graph=graph,
                     source=source["id"],
@@ -289,14 +413,18 @@ def build_knowledge_graph(analysis: dict) -> dict:
                     method="dependency",
                 )
 
-    # ---------------------------------------------------------
+    # =========================================================
     # HIGH-CONFIDENCE PATTERN RELATIONSHIPS
-    # ---------------------------------------------------------
+    # =========================================================
+
     for index, sentence in enumerate(sentences):
         if index >= len(sentence_nodes):
             break
 
-        nodes_in_sentence = sentence_nodes[index]
+        nodes_in_sentence = [
+            entry["node"]
+            for entry in sentence_nodes[index]
+        ]
 
         if len(nodes_in_sentence) < 2:
             continue
@@ -314,7 +442,11 @@ def build_knowledge_graph(analysis: dict) -> dict:
             relationship,
         )
 
-        if source and target and source["id"] != target["id"]:
+        if (
+            source
+            and target
+            and source["id"] != target["id"]
+        ):
             add_relationship(
                 graph=graph,
                 source=source["id"],
@@ -325,15 +457,29 @@ def build_knowledge_graph(analysis: dict) -> dict:
                 method="pattern",
             )
 
-    # ---------------------------------------------------------
+    # =========================================================
     # SERIALIZATION
-    # ---------------------------------------------------------
+    # =========================================================
+
     nodes = [
         {
             "id": node_id,
-            "label": data.get("label", node_id),
-            "type": data.get("type", "UNKNOWN"),
-            "description": data.get("description", ""),
+            "label": data.get(
+                "label",
+                node_id,
+            ),
+            "type": data.get(
+                "type",
+                "UNKNOWN",
+            ),
+            "description": data.get(
+                "description",
+                "",
+            ),
+            "aliases": data.get(
+                "aliases",
+                [],
+            ),
         }
         for node_id, data in graph.nodes(data=True)
     ]
@@ -346,10 +492,22 @@ def build_knowledge_graph(analysis: dict) -> dict:
                 "relationship",
                 "mentioned_with",
             ),
-            "weight": data.get("weight", 1),
-            "confidence": data.get("confidence", 0.5),
-            "sentence": data.get("sentence", ""),
-            "method": data.get("method", "unknown"),
+            "weight": data.get(
+                "weight",
+                1,
+            ),
+            "confidence": data.get(
+                "confidence",
+                0.5,
+            ),
+            "sentence": data.get(
+                "sentence",
+                "",
+            ),
+            "method": data.get(
+                "method",
+                "unknown",
+            ),
         }
         for source, target, data in graph.edges(data=True)
     ]
@@ -364,7 +522,9 @@ def build_knowledge_graph(analysis: dict) -> dict:
         "nodes": nodes,
         "relationships": relationships,
         "node_count": len(nodes),
-        "relationship_count": len(relationships),
+        "relationship_count": len(
+            relationships
+        ),
         "semantic_relationship_count": len(
             semantic_relationships
         ),
@@ -383,41 +543,62 @@ def build_knowledge_graph(analysis: dict) -> dict:
     }
 
 
-def find_best_node(token_texts, nodes):
+def find_best_node(
+    token_texts,
+    nodes,
+):
     for token_text in token_texts:
-        token_normalized = node_key(token_text)
+        token_key = node_key(
+            token_text
+        )
 
-        if not token_normalized:
+        if not token_key:
             continue
 
-        exact = []
-
         for node in nodes:
-            node_normalized = node_key(node["label"])
+            values = [
+                node.get("label", ""),
+                *node.get("aliases", []),
+            ]
 
-            if token_normalized == node_normalized:
-                exact.append(node)
+            for value in values:
+                value_key = node_key(
+                    value
+                )
 
-        if exact:
-            return exact[0]
+                if token_key == value_key:
+                    return node
 
-        for node in nodes:
-            node_normalized = node_key(node["label"])
+                token_words = set(
+                    token_key.split()
+                )
 
-            if (
-                token_normalized in node_normalized
-                and len(token_normalized) >= 4
-            ):
-                return node
+                value_words = set(
+                    value_key.split()
+                )
+
+                if (
+                    len(token_key) >= 4
+                    and token_words
+                    and token_words.issubset(
+                        value_words
+                    )
+                ):
+                    return node
 
     return None
 
 
-def detect_pattern_relationship(sentence: str):
+def detect_pattern_relationship(
+    sentence: str,
+):
     lowered = sentence.lower()
 
     for pattern, relationship in RELATION_PATTERNS:
-        if re.search(pattern, lowered):
+        if re.search(
+            pattern,
+            lowered,
+        ):
             return relationship
 
     return None
@@ -434,30 +615,63 @@ def choose_pattern_nodes(
         if relation != relationship:
             continue
 
-        match = re.search(pattern, lowered)
+        match = re.search(
+            pattern,
+            lowered,
+        )
 
         if not match:
             continue
 
-        before = lowered[:match.start()]
-        after = lowered[match.end():]
+        before = lowered[
+            :match.start()
+        ]
+
+        after = lowered[
+            match.end():
+        ]
 
         source_candidates = [
             node
             for node in nodes
-            if node["label"].lower() in before
+            if any(
+                value.lower() in before
+                for value in [
+                    node["label"],
+                    *node.get(
+                        "aliases",
+                        [],
+                    ),
+                ]
+            )
         ]
 
         target_candidates = [
             node
             for node in nodes
-            if node["label"].lower() in after
+            if any(
+                value.lower() in after
+                for value in [
+                    node["label"],
+                    *node.get(
+                        "aliases",
+                        [],
+                    ),
+                ]
+            )
         ]
 
-        if source_candidates and target_candidates:
+        if (
+            source_candidates
+            and target_candidates
+        ):
             return (
-                longest_node(source_candidates),
-                longest_node(target_candidates),
+                longest_node(
+                    source_candidates
+                ),
+                longest_node(
+                    target_candidates
+                ),
             )
 
     return nodes[0], nodes[1]
@@ -466,7 +680,9 @@ def choose_pattern_nodes(
 def longest_node(nodes):
     return max(
         nodes,
-        key=lambda node: len(node["label"]),
+        key=lambda node: len(
+            node["label"]
+        ),
     )
 
 
@@ -476,13 +692,21 @@ def relationship_exists(
     target,
     relationship,
 ):
-    if not graph.has_edge(source, target):
+    if not graph.has_edge(
+        source,
+        target,
+    ):
         return False
 
-    edges = graph.get_edge_data(source, target)
+    edges = graph.get_edge_data(
+        source,
+        target,
+    )
 
     for _, data in edges.items():
-        if data.get("relationship") == relationship:
+        if data.get(
+            "relationship"
+        ) == relationship:
             return True
 
     return False

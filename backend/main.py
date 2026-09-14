@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from services.document_processor import extract_text
 from services.nlp_processor import analyze_text
 from services.graph_processor import build_knowledge_graph
+from services.semantic_search import semantic_search
 
 
 LATEST_GRAPH = None
@@ -112,6 +113,44 @@ def strongest_relationships(limit: int = 10):
     return {
         "relationships": relationships[:limit]
     }
+
+@app.post("/graph/semantic-search")
+def graph_semantic_search(
+    query: str,
+    limit: int = 10,
+):
+    if not LATEST_GRAPH:
+        raise HTTPException(
+            status_code=404,
+            detail="No graph has been generated yet.",
+        )
+
+    if not query.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Search query cannot be empty.",
+        )
+
+    if limit < 1 or limit > 20:
+        raise HTTPException(
+            status_code=400,
+            detail="Limit must be between 1 and 20.",
+        )
+
+    results = semantic_search(
+        query=query,
+        nodes=LATEST_GRAPH["nodes"],
+        relationships=LATEST_GRAPH["relationships"],
+        limit=limit,
+    )
+
+    return {
+        "query": query,
+        "results": results,
+        "result_count": len(results),
+    }
+
+
 
 
 @app.post("/documents/analyze")

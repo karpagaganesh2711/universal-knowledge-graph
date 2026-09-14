@@ -21,8 +21,10 @@ function App() {
   const [selectedNode, setSelectedNode] = useState(null);
 
   const [graphFilter, setGraphFilter] = useState("all");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchMatch, setSearchMatch] = useState(null);
+const [searchQuery, setSearchQuery] = useState("");
+const [searchMatch, setSearchMatch] = useState(null);
+const [semanticResults, setSemanticResults] = useState([]);
+const [searching, setSearching] = useState(false);
 
   const handleFile = useCallback((selectedFile) => {
     if (!selectedFile) return;
@@ -302,47 +304,75 @@ const importantNodeIds = new Set(
       })
     ),
   ];
-  const searchKnowledge = () => {
-  const query = searchQuery.trim().toLowerCase();
+  const searchKnowledge = async () => {
+  const query = searchQuery.trim();
 
   if (!query) {
     setSearchMatch(null);
     setSelectedNode(null);
+    setSemanticResults([]);
     return;
   }
 
-  const match = allNodes.find((node) => {
-    const label = (node.label || "").toLowerCase();
-    const id = (node.id || "").toLowerCase();
-    const description = (
-      node.description || ""
-    ).toLowerCase();
+  setSearching(true);
 
-    return (
-      label.includes(query) ||
-      id.includes(query) ||
-      description.includes(query)
+  try {
+    const response = await fetch(
+      `${API_URL}/graph/semantic-search?query=${encodeURIComponent(
+        query
+      )}&limit=5`,
+      {
+        method: "POST",
+      }
     );
-  });
 
-  if (!match) {
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        data.detail || "Semantic search failed."
+      );
+    }
+
+    const results = data.results || [];
+
+    setSemanticResults(results);
+
+    if (results.length === 0) {
+      setSearchMatch(null);
+      setSelectedNode(null);
+      return;
+    }
+
+    const bestResult = results[0];
+
+    setSearchMatch(bestResult.id);
+    setGraphFilter("all");
+
+    setSelectedNode({
+      id: bestResult.id,
+      label: bestResult.label,
+      type: bestResult.type,
+      description: bestResult.description,
+      degree: bestResult.degree ?? 0,
+      importance: bestResult.importance ?? 0,
+      semanticSimilarity:
+        bestResult.semantic_similarity ?? 0,
+      relevanceScore:
+        bestResult.relevance_score ?? 0,
+    });
+  } catch (error) {
+    console.error(
+      "Semantic search error:",
+      error
+    );
+
     setSearchMatch(null);
     setSelectedNode(null);
-    return;
+    setSemanticResults([]);
+  } finally {
+    setSearching(false);
   }
-
-  setSearchMatch(match.id);
-
-  setGraphFilter("all");
-
-  setSelectedNode({
-    id: match.id,
-    label: match.label,
-    type: match.type,
-    description: match.description,
-    degree: match.degree ?? 0,
-    importance: match.importance ?? 0,
-  });
 };
 
   const graphStyle = [
@@ -806,66 +836,132 @@ const importantNodeIds = new Set(
 
             <section className="graph-panel">
 
-  <div className="search-panel">
+<div className="search-panel">
+  <div className="search-label">
+    KNOWLEDGE SEARCH
+  </div>
 
-    <div className="search-label">
-      KNOWLEDGE SEARCH
-    </div>
-
-    <div className="search-box">
-
-      <input
-        type="text"
-        value={searchQuery}
-        placeholder="Search concepts, entities, knowledge..."
-        onChange={(event) =>
-          setSearchQuery(event.target.value)
+  <div className="search-box">
+    <input
+      type="text"
+      value={searchQuery}
+      placeholder="Search concepts, entities, knowledge..."
+      onChange={(event) =>
+        setSearchQuery(event.target.value)
+      }
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          searchKnowledge();
         }
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            searchKnowledge();
-          }
+      }}
+    />
+
+    <button
+      type="button"
+      onClick={searchKnowledge}
+      disabled={searching}
+    >
+      {searching ? "SEARCHING..." : "SEARCH"}
+    </button>
+
+    {searchMatch && (
+      <button
+        type="button"
+        onClick={() => {
+          setSearchQuery("");
+          setSearchMatch(null);
+          setSelectedNode(null);
+          setSemanticResults([]);
         }}
-      />
+      >
+        CLEAR
+      </button>
+    )}
+  </div>
 
-     <button
-  type="button"
-  onClick={searchKnowledge}
->
-  SEARCH
-</button>
-
-{searchMatch && (
-  <button
-    type="button"
-    onClick={() => {
-      setSearchQuery("");
-      setSearchMatch(null);
-      setSelectedNode(null);
-    }}
-  >
-    CLEAR
-  </button>
-)}
-
+  {searching && (
+    <div className="search-status success">
+      ANALYZING SEMANTIC RELATIONSHIPS...
     </div>
+  )}
 
-    {searchQuery && !searchMatch && (
+  {!searching &&
+    searchQuery &&
+    semanticResults.length === 0 && (
       <div className="search-status">
-        NO MATCH FOUND
+        NO SEMANTIC MATCH FOUND
       </div>
     )}
 
-    {searchMatch && (
-  <div className="search-status success">
-    NODE LOCATED: {searchMatch}
-    {" • "}
-    FOCUS MODE ACTIVE
-  </div>
-)}
+  {semanticResults.length > 0 && (
+    <div className="semantic-results">
+      <div className="semantic-results-header">
+        TOP SEMANTIC MATCHES
+      </div>
 
-  </div>
+      {semanticResults.map((result, index) => (
+        <button
+          key={result.id}
+          type="button"
+          className={`semantic-result ${
+            result.id === searchMatch
+              ? "active"
+              : ""
+          }`}
+          onClick={() => {
+            setSearchMatch(result.id);
+            setGraphFilter("all");
 
+            setSelectedNode({
+              id: result.id,
+              label: result.label,
+              type: result.type,
+              description: result.description,
+              degree: result.degree ?? 0,
+              importance: result.importance ?? 0,
+              semanticSimilarity:
+                result.semantic_similarity ?? 0,
+              relevanceScore:
+                result.relevance_score ?? 0,
+            });
+          }}
+        >
+          <span className="semantic-rank">
+            {String(index + 1).padStart(2, "0")}
+          </span>
+
+          <span className="semantic-result-info">
+            <span className="semantic-result-label">
+              {result.label}
+            </span>
+
+            <span className="semantic-result-meta">
+              RELEVANCE{" "}
+              {Math.round(
+                result.relevance_score * 100
+              )}
+              %
+              {" • "}
+              SEMANTIC{" "}
+              {Math.round(
+                result.semantic_similarity * 100
+              )}
+              %
+            </span>
+          </span>
+        </button>
+      ))}
+    </div>
+  )}
+
+  {searchMatch && (
+    <div className="search-status success">
+      NODE LOCATED: {searchMatch}
+      {" • "}
+      FOCUS MODE ACTIVE
+    </div>
+  )}
+</div>
 
   <div className="graph-header">
                 <span>

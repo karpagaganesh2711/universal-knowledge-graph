@@ -1413,3 +1413,69 @@ footer {
   color: #ff9f43;
 }
 
+.semantic-results {
+  margin-top: 10px;
+  border: 1px solid #252a30;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.semantic-results-header {
+  padding: 8px 10px;
+  border-bottom: 1px solid #252a30;
+  font-family: "Orbitron", sans-serif;
+  font-size: 7px;
+  letter-spacing: 0.12em;
+  color: #626a73;
+}
+
+.semantic-result {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  border-bottom: 1px solid #1b1f24;
+  background: transparent;
+  color: #eeeeee;
+  text-align: left;
+  cursor: pointer;
+}
+
+.semantic-result:last-child {
+  border-bottom: 0;
+}
+
+.semantic-result:hover,
+.semantic-result.active {
+  background: rgba(255, 59, 48, 0.08);
+}
+
+.semantic-rank {
+  min-width: 20px;
+  font-family: "Orbitron", sans-serif;
+  font-size: 8px;
+  color: #ff493f;
+}
+
+.semantic-result-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.semantic-result-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Rajdhani", sans-serif;
+  font-size: 13px;
+}
+
+.semantic-result-meta {
+  font-family: "Orbitron", sans-serif;
+  font-size: 6px;
+  letter-spacing: 0.08em;
+  color: #6f7780;
+}

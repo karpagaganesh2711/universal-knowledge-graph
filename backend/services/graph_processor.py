@@ -482,6 +482,149 @@ def build_knowledge_graph(analysis: dict) -> dict:
                 method="pattern",
             )
 
+                # =========================================================
+    # CONTEXTUAL SEMANTIC RELATIONSHIPS
+    # =========================================================
+
+    for index, sentence in enumerate(sentences):
+        if index >= len(sentence_nodes):
+            break
+
+        nodes_in_sentence = [
+            entry["node"]
+            for entry in sentence_nodes[index]
+        ]
+
+        unique_nodes = []
+        seen_ids = set()
+
+        for node in nodes_in_sentence:
+            node_id = node.get("id")
+
+            if not node_id or node_id in seen_ids:
+                continue
+
+            seen_ids.add(node_id)
+            unique_nodes.append(node)
+
+        if len(unique_nodes) < 2:
+            continue
+
+        sentence_lower = sentence.lower()
+
+        semantic_hints = []
+
+        if any(
+            phrase in sentence_lower
+            for phrase in [
+                "learn from data",
+                "learning from data",
+                "machine learning",
+                "training data",
+                "predictive models",
+                "make predictions",
+            ]
+        ):
+            semantic_hints.append(
+                "learns_from"
+            )
+
+        if any(
+            phrase in sentence_lower
+            for phrase in [
+                "knowledge graph",
+                "knowledge graphs",
+                "semantic connections",
+                "related information",
+                "entities and relationships",
+            ]
+        ):
+            semantic_hints.append(
+                "semantically_connects"
+            )
+
+        if any(
+            phrase in sentence_lower
+            for phrase in [
+                "natural language processing",
+                "nlp systems",
+                "human language",
+                "linguistic patterns",
+            ]
+        ):
+            semantic_hints.append(
+                "processes_language"
+            )
+
+        if any(
+            phrase in sentence_lower
+            for phrase in [
+                "database",
+                "databases",
+                "structured information",
+                "data integrity",
+            ]
+        ):
+            semantic_hints.append(
+                "manages_information"
+            )
+
+        if any(
+            phrase in sentence_lower
+            for phrase in [
+                "cloud computing",
+                "cloud platforms",
+                "distributed resources",
+            ]
+        ):
+            semantic_hints.append(
+                "provides_computing"
+            )
+
+        if semantic_hints:
+            contextual_relationship = semantic_hints[0]
+        else:
+            contextual_relationship = "related_to"
+
+        for source_index, source_node in enumerate(
+            unique_nodes
+        ):
+            for target_node in unique_nodes[
+                source_index + 1:
+            ]:
+                source_id = source_node.get("id")
+                target_id = target_node.get("id")
+
+                if not source_id or not target_id:
+                    continue
+
+                if source_id == target_id:
+                    continue
+
+                add_relationship(
+                    graph=graph,
+                    source=source_id,
+                    target=target_id,
+                    relationship=contextual_relationship,
+                    confidence=0.78,
+                    sentence=sentence,
+                    method="semantic-context",
+                )
+
+                add_relationship(
+                    graph=graph,
+                    source=target_id,
+                    target=source_id,
+                    relationship=contextual_relationship,
+                    confidence=0.78,
+                    sentence=sentence,
+                    method="semantic-context",
+                )
+
+    # =========================================================
+    # GRAPH INTELLIGENCE METADATA
+    # =========================================================
+
     # =========================================================
     # GRAPH INTELLIGENCE METADATA
     # =========================================================

@@ -3,6 +3,7 @@ from tempfile import NamedTemporaryFile
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 
 from services.document_processor import extract_text
 from services.nlp_processor import analyze_text
@@ -11,13 +12,18 @@ from services.semantic_search import semantic_search
 
 
 LATEST_GRAPH = None
+DOCUMENT_GRAPHS = []
 
 
 app = FastAPI(
     title="Universal Knowledge Graph Generator",
-    description="An AI-powered system that converts documents into interactive knowledge graphs.",
+    description=(
+        "An AI-powered system that converts documents "
+        "into interactive knowledge graphs."
+    ),
     version="0.6.0",
 )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,6 +35,55 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+
+    schemas = openapi_schema.get(
+        "components",
+        {}
+    ).get(
+        "schemas",
+        {}
+    )
+
+    for schema in schemas.values():
+        properties = schema.get(
+            "properties",
+            {}
+        )
+
+        files_property = properties.get("files")
+
+        if not files_property:
+            continue
+
+        if files_property.get("type") != "array":
+            continue
+
+        items = files_property.get("items", {})
+
+        if items.get("contentMediaType"):
+            items.pop(
+                "contentMediaType",
+                None
+            )
+
+            items["format"] = "binary"
+
+    app.openapi_schema = openapi_schema
+
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 @app.get("/")
@@ -40,7 +95,9 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy"
+    }
 
 
 @app.get("/graph/stats")
@@ -81,9 +138,7 @@ def important_nodes(limit: int = 10):
         )
 
     return {
-        "nodes": LATEST_GRAPH[
-            "most_important_nodes"
-        ][:limit]
+        "nodes": LATEST_GRAPH["most_important_nodes"][:limit]
     }
 
 
@@ -103,16 +158,14 @@ def strongest_relationships(limit: int = 10):
 
     relationships = sorted(
         LATEST_GRAPH["relationships"],
-        key=lambda item: item.get(
-            "score",
-            0,
-        ),
+        key=lambda item: item.get("score", 0),
         reverse=True,
     )
 
     return {
         "relationships": relationships[:limit]
     }
+
 
 @app.post("/graph/semantic-search")
 def graph_semantic_search(
@@ -151,10 +204,10 @@ def graph_semantic_search(
     }
 
 
-
-
 @app.post("/documents/analyze")
-async def analyze_document(file: UploadFile = File(...)):
+async def analyze_document(
+    file: UploadFile = File(...)
+):
     if not file.filename:
         raise HTTPException(
             status_code=400,
@@ -172,7 +225,9 @@ async def analyze_document(file: UploadFile = File(...)):
     if extension not in allowed_extensions:
         raise HTTPException(
             status_code=400,
-            detail="Only PDF, DOCX, and TXT files are supported.",
+            detail=(
+                "Only PDF, DOCX, and TXT files are supported."
+            ),
         )
 
     file_content = await file.read()
@@ -192,7 +247,9 @@ async def analyze_document(file: UploadFile = File(...)):
         if not text:
             raise HTTPException(
                 status_code=422,
-                detail="No readable text was found in the document.",
+                detail=(
+                    "No readable text was found in the document."
+                ),
             )
 
         analysis = analyze_text(text)
@@ -230,3 +287,244 @@ async def analyze_document(file: UploadFile = File(...)):
             Path(temporary_path).unlink(
                 missing_ok=True
             )
+
+
+@app.post("/documents/analyze-multiple")
+async def analyze_multiple_documents(
+    files: list[UploadFile] = File(...)
+):
+    if not files:
+        raise HTTPException(
+            status_code=400,
+            detail="No documents were provided.",
+        )
+
+    allowed_extensions = {
+        ".pdf",
+        ".docx",
+        ".txt",
+    }
+
+    document_results = []
+    unified_nodes = {}
+    unified_relationships = []
+
+    for file in files:
+
+        if not file.filename:
+            continue
+
+        extension = Path(file.filename).suffix.lower()
+
+        if extension not in allowed_extensions:
+            continue
+
+        file_content = await file.read()
+        temporary_path = None
+
+        try:
+            with NamedTemporaryFile(
+                delete=False,
+                suffix=extension,
+            ) as temporary_file:
+                temporary_file.write(file_content)
+                temporary_path = temporary_file.name
+
+            text = extract_text(temporary_path)
+
+            if not text:
+                continue
+
+            analysis = analyze_text(text)
+            graph = build_knowledge_graph(analysis)
+
+            document_results.append(
+                {
+                    "filename": file.filename,
+                    "file_type": extension.replace(
+                        ".",
+                        "",
+                    ).upper(),
+                    "characters": len(text),
+                    "words": len(text.split()),
+                    "node_count": graph["node_count"],
+                    "relationship_count": graph[
+                        "relationship_count"
+                    ],
+                }
+            )
+
+            # =============================================
+            # MERGE NODES
+            # =============================================
+
+            for node in graph["nodes"]:
+
+                node_id = node["id"]
+
+                if node_id not in unified_nodes:
+
+                    unified_nodes[node_id] = {
+                        **node,
+                        "source_documents": [
+                            file.filename
+                        ],
+                    }
+
+                else:
+
+                    if (
+                        file.filename
+                        not in unified_nodes[node_id][
+                            "source_documents"
+                        ]
+                    ):
+                        unified_nodes[node_id][
+                            "source_documents"
+                        ].append(
+                            file.filename
+                        )
+
+                    aliases = set(
+                        unified_nodes[node_id].get(
+                            "aliases",
+                            [],
+                        )
+                    )
+
+                    aliases.update(
+                        node.get(
+                            "aliases",
+                            [],
+                        )
+                    )
+
+                    unified_nodes[node_id][
+                        "aliases"
+                    ] = list(aliases)
+
+            # =============================================
+            # MERGE RELATIONSHIPS
+            # =============================================
+
+            for relationship in graph["relationships"]:
+
+                enriched_relationship = {
+                    **relationship,
+                    "source_document": file.filename,
+                }
+
+                duplicate = any(
+                    existing["source"]
+                    == enriched_relationship["source"]
+                    and existing["target"]
+                    == enriched_relationship["target"]
+                    and existing["relationship"]
+                    == enriched_relationship[
+                        "relationship"
+                    ]
+                    and existing.get(
+                        "source_document"
+                    )
+                    == file.filename
+                    for existing in unified_relationships
+                )
+
+                if not duplicate:
+                    unified_relationships.append(
+                        enriched_relationship
+                    )
+
+        finally:
+
+            if temporary_path:
+                Path(temporary_path).unlink(
+                    missing_ok=True
+                )
+
+    if not document_results:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No valid readable documents were processed."
+            ),
+        )
+
+    # =============================================
+    # BUILD UNIFIED GRAPH
+    # =============================================
+
+    unified_graph = {
+        "nodes": list(
+            unified_nodes.values()
+        ),
+        "relationships": unified_relationships,
+        "node_count": len(unified_nodes),
+        "relationship_count": len(
+            unified_relationships
+        ),
+        "semantic_relationship_count": len(
+            unified_relationships
+        ),
+        "average_relationship_confidence": (
+            round(
+                sum(
+                    relationship.get(
+                        "confidence",
+                        0,
+                    )
+                    for relationship
+                    in unified_relationships
+                )
+                / len(
+                    unified_relationships
+                ),
+                4,
+            )
+            if unified_relationships
+            else 0
+        ),
+        "average_relationship_score": (
+            round(
+                sum(
+                    relationship.get(
+                        "score",
+                        0,
+                    )
+                    for relationship
+                    in unified_relationships
+                )
+                / len(
+                    unified_relationships
+                ),
+                4,
+            )
+            if unified_relationships
+            else 0
+        ),
+    }
+
+    global LATEST_GRAPH
+    global DOCUMENT_GRAPHS
+
+    LATEST_GRAPH = unified_graph
+    DOCUMENT_GRAPHS = document_results
+
+    return {
+        "status": "multi_document_graph_generated",
+        "document_count": len(
+            document_results
+        ),
+        "documents": document_results,
+        "graph": unified_graph,
+    }
+
+
+@app.get("/documents")
+def list_documents():
+    return {
+        "document_count": len(
+            DOCUMENT_GRAPHS
+        ),
+        "documents": DOCUMENT_GRAPHS,
+    }

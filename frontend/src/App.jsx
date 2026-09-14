@@ -21,6 +21,8 @@ function App() {
   const [selectedNode, setSelectedNode] = useState(null);
 
   const [graphFilter, setGraphFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchMatch, setSearchMatch] = useState(null);
 
   const handleFile = useCallback((selectedFile) => {
     if (!selectedFile) return;
@@ -230,19 +232,36 @@ const importantNodeIds = new Set(
 );
 
   const visibleNodes = allNodes.filter((node) => {
-    const degree = node.degree ?? 0;
-    const importance = node.importance ?? 0;
+  const degree = node.degree ?? 0;
 
-    if (graphFilter === "connected") {
-      return degree > 0;
+  if (searchMatch) {
+    if (node.id === searchMatch) {
+      return true;
     }
 
-    if (graphFilter === "important") {
-  return importantNodeIds.has(node.id);
-}
+    return allRelationships.some(
+      (relationship) =>
+        (
+          relationship.source === searchMatch &&
+          relationship.target === node.id
+        ) ||
+        (
+          relationship.target === searchMatch &&
+          relationship.source === node.id
+        )
+    );
+  }
 
-    return true;
-  });
+  if (graphFilter === "connected") {
+    return degree > 0;
+  }
+
+  if (graphFilter === "important") {
+    return importantNodeIds.has(node.id);
+  }
+
+  return true;
+});
 
   const visibleNodeIds = new Set(
     visibleNodes.map((node) => node.id)
@@ -257,14 +276,16 @@ const importantNodeIds = new Set(
   const graphElements = [
     ...visibleNodes.map((node) => ({
       data: {
-        id: node.id,
-        label: node.label,
-        type: node.type,
-        description: node.description,
-        aliases: node.aliases || [],
-        degree: node.degree ?? 0,
-        importance: node.importance ?? 0,
-      },
+  id: node.id,
+  label: node.label,
+  type: node.type,
+  description: node.description,
+  aliases: node.aliases || [],
+  degree: node.degree ?? 0,
+  importance: node.importance ?? 0,
+
+  searchMatch: searchMatch === node.id,
+},
     })),
 
     ...visibleRelationships.map(
@@ -281,6 +302,48 @@ const importantNodeIds = new Set(
       })
     ),
   ];
+  const searchKnowledge = () => {
+  const query = searchQuery.trim().toLowerCase();
+
+  if (!query) {
+    setSearchMatch(null);
+    setSelectedNode(null);
+    return;
+  }
+
+  const match = allNodes.find((node) => {
+    const label = (node.label || "").toLowerCase();
+    const id = (node.id || "").toLowerCase();
+    const description = (
+      node.description || ""
+    ).toLowerCase();
+
+    return (
+      label.includes(query) ||
+      id.includes(query) ||
+      description.includes(query)
+    );
+  });
+
+  if (!match) {
+    setSearchMatch(null);
+    setSelectedNode(null);
+    return;
+  }
+
+  setSearchMatch(match.id);
+
+  setGraphFilter("all");
+
+  setSelectedNode({
+    id: match.id,
+    label: match.label,
+    type: match.type,
+    description: match.description,
+    degree: match.degree ?? 0,
+    importance: match.importance ?? 0,
+  });
+};
 
   const graphStyle = [
     {
@@ -340,8 +403,24 @@ const importantNodeIds = new Set(
         shape: "ellipse",
       },
     },
-
     {
+  selector: 'node[searchMatch = "true"]',
+
+  style: {
+    "background-color": "#ff493f",
+    "border-color": "#ffffff",
+    "border-width": 4,
+    width: 76,
+    height: 76,
+    "font-size": 13,
+    "text-outline-width": 5,
+    "overlay-opacity": 0.15,
+    "overlay-color": "#ff493f",
+  },
+},
+
+{
+
       selector: "node:selected",
 
       style: {
@@ -726,7 +805,69 @@ const importantNodeIds = new Set(
             </aside>
 
             <section className="graph-panel">
-              <div className="graph-header">
+
+  <div className="search-panel">
+
+    <div className="search-label">
+      KNOWLEDGE SEARCH
+    </div>
+
+    <div className="search-box">
+
+      <input
+        type="text"
+        value={searchQuery}
+        placeholder="Search concepts, entities, knowledge..."
+        onChange={(event) =>
+          setSearchQuery(event.target.value)
+        }
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            searchKnowledge();
+          }
+        }}
+      />
+
+     <button
+  type="button"
+  onClick={searchKnowledge}
+>
+  SEARCH
+</button>
+
+{searchMatch && (
+  <button
+    type="button"
+    onClick={() => {
+      setSearchQuery("");
+      setSearchMatch(null);
+      setSelectedNode(null);
+    }}
+  >
+    CLEAR
+  </button>
+)}
+
+    </div>
+
+    {searchQuery && !searchMatch && (
+      <div className="search-status">
+        NO MATCH FOUND
+      </div>
+    )}
+
+    {searchMatch && (
+  <div className="search-status success">
+    NODE LOCATED: {searchMatch}
+    {" • "}
+    FOCUS MODE ACTIVE
+  </div>
+)}
+
+  </div>
+
+
+  <div className="graph-header">
                 <span>
                   SEMANTIC RELATIONSHIP MAP
                 </span>
@@ -791,8 +932,8 @@ const importantNodeIds = new Set(
 
               <div className="graph-container">
                 {graphElements.length > 0 ? (
-                  <CytoscapeComponent
-  key={`${graphFilter}-${visibleNodes.length}-${visibleRelationships.length}`}
+                 <CytoscapeComponent
+  key={`${graphFilter}-${searchMatch}-${visibleNodes.length}`}
   elements={graphElements}
                     stylesheet={graphStyle}
                     layout={graphLayout}
@@ -874,9 +1015,9 @@ const importantNodeIds = new Set(
       <footer>
         K-GRAPH&nbsp;&nbsp;/&nbsp;&nbsp;
         DOCUMENT → CONCEPT → RELATIONSHIP → KNOWLEDGE
-      </footer>
+           </footer>
     </div>
   );
-}
 
+}
 export default App;

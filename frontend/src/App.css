@@ -1320,3 +1320,96 @@ footer {
   }
 }
 
+
+/* =========================================================
+   KNOWLEDGE SEARCH
+   ========================================================= */
+
+.search-panel {
+  padding: 12px 16px;
+
+  border-bottom: 1px solid #252a30;
+
+  background: rgba(255, 255, 255, 0.008);
+}
+
+.search-label {
+  margin-bottom: 7px;
+
+  font-family: "Orbitron", sans-serif;
+  font-size: 7px;
+  letter-spacing: 0.14em;
+
+  color: #626a73;
+}
+
+.search-box {
+  display: flex;
+  gap: 7px;
+}
+
+.search-box input {
+  flex: 1;
+  min-width: 0;
+
+  padding: 10px 12px;
+
+  border: 1px solid #292e34;
+  outline: none;
+
+  background: #080b0f;
+
+  color: #eeeeee;
+
+  font-family: "Rajdhani", sans-serif;
+  font-size: 13px;
+
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.search-box input::placeholder {
+  color: #444c54;
+}
+
+.search-box input:focus {
+  border-color: #7b302c;
+
+  box-shadow:
+    0 0 12px rgba(255, 59, 48, 0.08);
+}
+
+.search-box button {
+  padding: 0 15px;
+
+  border: 1px solid #ff493f;
+
+  background: rgba(255, 59, 48, 0.08);
+
+  color: #ff756d;
+
+  font-family: "Orbitron", sans-serif;
+  font-size: 7px;
+  letter-spacing: 0.1em;
+}
+
+.search-box button:hover {
+  background: rgba(255, 59, 48, 0.2);
+  color: #ffffff;
+}
+
+.search-status {
+  margin-top: 7px;
+
+  font-family: "Orbitron", sans-serif;
+  font-size: 7px;
+  letter-spacing: 0.1em;
+
+  color: #ff493f;
+}
+
+.search-status.success {
+  color: #ff9f43;
+}
+
